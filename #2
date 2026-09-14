@@ -1,0 +1,62 @@
+--2*. Необходимо посчитать количество зафиксированных превышений скорости в разбивке по районам Москвы за предыдущую неделю, 
+--а также вывести топ-100 нарушителей по всей Москве: отдельно по количеству нарушений за неделю и отдельно по величине самого превышения. 
+
+--2.1.  По районам за неделю
+	select
+		district_nm,
+		count(*) filter (where fix_speed>allowed_speed)
+	from
+		camera c
+	left join
+		auto_fixation af on c.camera_id = af.camera_id
+	where
+		fix_dttm >= date_trunc('week', now()) - interval '1 week'
+		and fix_dttm <  date_trunc('week', now())
+	group by
+		1
+
+--Взяли последнюю неделю, сгруппировали по районам, и вывели количество нарушений по районам
+
+
+		
+--2.2.  По количеству нарушений за неделю
+	select
+		hash_grz,
+		count(*) filter (where fix_speed>allowed_speed) as cnt
+	from
+		сamera c
+	left join
+		auto_fixation af on c.camera_id = af.camera_id
+	where
+		fix_dttm >= date_trunc('week', now()) - interval '1 week'
+		and fix_dttm <  date_trunc('week', now())
+	group by
+		1
+	order by
+		cnt DESC
+	limit 100
+
+  --Отсеяли записи по последней неделе, сгруппировали по хэшу автомобилей, посчитали количество нарушений 
+  --на автомобиль, отсортировали по убыванию и ограничили вывод 100 строками
+	
+--2.3  По величине самого превышения
+	select
+		hash_grz,
+		max(fix_speed - allowed_speed) as exced
+	from
+		camera c
+	left join
+		auto_fixation af on c.camera_id = af.camera_id
+	where
+		fix_dttm >= date_trunc('week', now()) - interval '1 week'
+		and fix_dttm <  date_trunc('week', now())
+		and fix_speed > allowed_speed
+	group by
+		1
+	order by
+		exced desc
+	limit
+		100
+
+    --Отсеяли записи по последней неделе, сгруппировали по хэшу автомобилей, взяли максимальное нарушение
+    --на автомобиль, отсортировали по убыванию и ограничили вывод 100 строками
