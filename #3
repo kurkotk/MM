@@ -1,0 +1,95 @@
+3*. Необходимо найти среднее (медианное) время проезда участка 5-4 за последние 3 месяца 
+с разбивкой по дням недели и времени суток (07-11 утро, 11 – 17 день, 17 – 21 вечер, 21 – 07 ночь). 
+Среди полученной усредненной длительности проезда найти самое часто встречаемое значение (моду), 
+предварительно округлив результаты до целых минут. 
+
+1 - по направлению камеры, 0 - навстречу камере
+
+
+with base as (
+select
+	hash_grz, 
+    fix_dttm, 
+    c.camera_id, 
+    direction
+from
+  	camera c 
+join
+	  auto_fixation af on c.camera_id = af.camera_id 
+where
+	c.camera_id in (4,5) 
+	and fix_dttm >= date_trunc('month', now()) - interval '3 month'
+	and fix_dttm <  date_trunc('month', now())
+),
+four_to_five as (
+    select
+        b1.hash_grz,
+        b1.fix_dttm as starts,
+        b2.fix_dttm as ends,
+        extract(epoch from (b2.fix_dttm - b1.fix_dttm)) / 60.0 as minutes,
+        row_number() over (partition by b1.hash_grz, b1.fix_dttm order by b2.fix_dttm asc) as rn
+    from 
+    	base b1
+    join
+         base b2 on b1.hash_grz = b2.hash_grz and b1.camera_id = 4  and b2.camera_id = 5
+        									  and b2.fix_dttm > b1.fix_dttm
+									          and b1.direction = 1
+),
+five_to_four as (
+    select
+        b1.hash_grz,
+        b1.fix_dttm as starts,
+        b2.fix_dttm as ends,
+        extract(epoch from (b2.fix_dttm - b1.fix_dttm)) / 60.0 as minutes,
+        row_number() over (partition by b1.hash_grz, b1.fix_dttm order by b2.fix_dttm asc
+        ) as rn
+    from 
+    	base b1
+    join 
+    	base b2 on b1.hash_grz = b2.hash_grz and b1.camera_id = 5 and b2.camera_id = 4
+        								   and b2.fix_dttm > b1.fix_dttm
+									       and b2.direction = 0
+),
+botth as (
+	select hash_grz, starts, ends, minutes from four_to_five where rn = 1
+    union all
+    select hash_grz, starts, ends, minutes from five_to_four where rn = 1
+),
+pred_final as (
+    select
+        minutes,
+        extract(dow from starts) as dow,
+        case
+        when extract(hour from starts) >= 7  and extract(hour from starts) < 11 then 'Утро'
+        when extract(hour from starts) >= 11 and extract(hour from starts) < 17 then 'День'
+        when extract(hour from starts) >= 17 and extract(hour from starts) < 21 then 'Вечер'
+        else 'Ночь' end as time_period
+    from botth
+),
+medians as (
+    select
+        dow,
+        time_period,
+        round(percentile_cont(0.5) within group (order by minutes)) as median
+    from 
+    	pred_final
+    group by 
+    	1,2
+)
+select
+    median
+from 
+	medians
+group by 
+	1
+order by 
+	count(*) desc
+limit 
+	1
+
+
+
+--Сначала определяем строки которые пойдут для рассчёта (последние 3 календарных месяца), также отсеиваем ненужное, и берём только две нужные для нас камеры (4 и 5)
+--Рассчитываем для случая когда едут от 4 камеры к 5, и наоборт, взяв за основу логику, что если человек проехал камеру 4 следующая должна быть камера 5
+--В скрипте нет защиты от ситуаций когда человек мог проехать камеру 4, и заглохнуть, сломаться и.т.п форс мажоры, для этого пришлось бы ограничить окно просмотра
+--После обьединяем в одну кте, явно определяем периоды, и дни недели, рассчитываем для них медиану, и смотрим уже моду из медиан
