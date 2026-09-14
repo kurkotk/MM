@@ -57,3 +57,35 @@ from
 --final отсеиваем автомобили у которых меньше 3 поездок по Тверскому району, и у которых количество недель с 3 и больше поездками не совпадает с числом полных недель внутри месяца
 --И наконец считаем кол-во уникальных автомобилей, которые каждую полную неделю прошлого календарного месяца совершили минимум 3 поездки по тверскому району, 
 --и процент тех кто превышал скорость хоть раз в этом месяце из этой выборки
+
+
+
+
+
+with base as (
+select
+	hash_grz,
+	max(case when allowed_speed < fix_speed then 1 else 0 end) as exced,
+	count(*) as cnt_car,
+	round((extract(day from date_trunc('month', current_date) - interval '1 day') / 7.0) * 3, 2) as hold
+from 
+	camera c 
+join
+	auto_fixation af on af.camera_id = c.camera_id 
+where
+	district_nm = 'Тверской'
+	and fix_dttm >= date_trunc('month', now()) - interval '1 month'
+	and fix_dttm <  date_trunc('month', now())	
+group by
+	1
+)
+select
+	count(distinct hash_grz) as cnt_car,
+	ROUND(100.0 * count(distinct hash_grz) filter (where exced = 1) / count(distinct hash_grz),2) as pct_exc
+from
+	base
+where
+	cnt_car > hold
+--Если не брать за строгое правило "не менее 3-х раз в неделю", а взять количество дней в месяце, и поделить на кол-во дней в неделе, т.е на 7
+--И взять число недель "с остатком" 31/7 -> ~ 4.5 и умножить на 3, получим в районе 13.5, и брать это как за границу допуска автомобиля,
+--Такой подход облегчает всё, но выше более строгий подход
