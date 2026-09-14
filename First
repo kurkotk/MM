@@ -1,0 +1,59 @@
+with base as (
+	select
+		date_trunc('week', fix_dttm)::date as week,
+		hash_grz,
+		case when allowed_speed < fix_speed then 1 else 0 end as exced
+	from
+		camera c
+	left join
+		auto_fixation af on c.camera_id = af.camera_id
+	where
+		district_nm = 'Тверской' 
+		and fix_dttm >= date_trunc('month', now()) - interval '1 month'
+	  	and fix_dttm <  date_trunc('month', now())
+	  	and date_trunc('week', fix_dttm) >= date_trunc('month', now()) - interval '1 month'
+	    and date_trunc('week', fix_dttm) + interval '7 days' <= date_trunc('month', now())
+),
+week_cnt as (
+	select
+		count(distinct week) as cnt_week
+	from
+		base
+),
+week_car as (
+	select
+		week,
+		hash_grz,
+		count(*) as cnt,
+		max(exced) as exced
+	from
+		base
+	group by
+		1,2
+),
+final as (
+	select 
+		hash_grz,
+		max(exced) as exced
+    from 
+    	week_car
+    group by 
+    	1
+    having 
+    	min(cnt) >= 3
+        and count(*) = (select cnt_week from week_cnt)
+)
+select
+	count(hash_grz) as uniq_car,
+	ROUND(100.0 * count(hash_grz) filter (where exced = 1) / nullif(count(hash_grz),0),2) as pct_exceded
+from
+	final
+
+
+--В cte base оставляем записи за предыдущий месяц, и только те недели, которые целиком внутри месяца, т.е если в месяц попадают пн-сб, но нет вс, записи по этой неделе убираем. 
+--Считаем 3 проезда по тверской только по полным неделям, в ТЗ не было явно указано как поступить с этим, был сделан выбор в пользу надежности, дабы избежать выбросов из-за неполных недель
+--week_cnt вспомогательная cte чтобы понять сколько в итоге целых недель у нас попало в месяц
+--week_car считаем на агрегат неделя+авто сколько вхождений, и если было хоть 1 превышение скорости, записываем как превышающего
+--final отсеиваем автомобили у которых меньше 3 поездок по Тверскому району, и у которых количество недель с 3 и больше поездками не совпадает с числом полных недель внутри месяца
+--И наконец считаем кол-во уникальных автомобилей, которые каждую полную неделю прошлого календарного месяца совершили минимум 3 поездки по тверскому району, 
+--и процент тех кто превышал скорость хоть раз в этом месяце из этой выборки
