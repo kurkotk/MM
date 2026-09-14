@@ -1,0 +1,51 @@
+4*. Необходимо найти все дни с начала года, 
+в которые количество заехавших в тупик машин было более, 
+чем в 2 раза больше, чем в среднем по всем дням.	
+
+
+with days as (
+	select
+		fix_dttm::date as day,
+		count(*) as cnt
+	from
+		  camera c 
+	join
+		  auto_fixation af on c.camera_id = af.camera_id
+	where
+		c.camera_id = 1
+		and direction = 1
+	group by
+		1
+),
+avgs as (
+	select
+		avg(cnt) as average_tupic
+	from
+		days
+),
+base as (
+	select
+		fix_dttm::date as day,
+		count(*) as cnt
+	from
+	   camera c 
+	join
+		  auto_fixation af on c.camera_id = af.camera_id
+	where
+		c.camera_id = 1
+		and direction = 1
+		and fix_dttm > '2026-01-01'
+	group by
+		1
+)
+select
+	day
+from
+	base
+where 
+	cnt > (select average_tupic * 2 from avgs)
+
+
+--Сначала сделали предагрет для границы в виде среднего, по всем доступным дням
+--Взяли выборку по дням в текущем году, и посчитали кол-во заездов в тупик в день
+--Сравнили, какой день привышает среднее значение более чем в два раза
