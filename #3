@@ -87,9 +87,86 @@ order by
 limit 
 	1
 
-
-
 --Сначала определяем строки которые пойдут для рассчёта (последние 3 календарных месяца), также отсеиваем ненужное, и берём только две нужные для нас камеры (4 и 5)
 --Рассчитываем для случая когда едут от 4 камеры к 5, и наоборт, взяв за основу логику, что если человек проехал камеру 4 следующая должна быть камера 5
 --В скрипте нет защиты от ситуаций когда человек мог проехать камеру 4, и заглохнуть, сломаться и.т.п форс мажоры, для этого пришлось бы ограничить окно просмотра
 --После обьединяем в одну кте, явно определяем периоды, и дни недели, рассчитываем для них медиану, и смотрим уже моду из медиан
+
+
+
+
+with base as (
+	select
+		hash_grz, 
+	    fix_dttm, 
+	    c.camera_id, 
+	    direction
+	from
+	  	camera c 
+	join
+		auto_fixation af on c.camera_id = af.camera_id 
+	where
+		fix_dttm >= date_trunc('month', now()) - interval '3 month'
+		and fix_dttm <  date_trunc('month', now())
+),
+next_cam as (
+    select
+        hash_grz,
+        fix_dttm as starts,
+        camera_id,
+        direction,
+        lead(fix_dttm)   over (partition by hash_grz order by fix_dttm) as ends,
+        lead(camera_id)  over (partition by hash_grz order by fix_dttm) as next_camera,
+        lead(direction)  over (partition by hash_grz order by fix_dttm) as next_dir
+    from
+        base
+),
+pairs as (
+    select
+        hash_grz,
+        starts,
+        ends,
+        extract(epoch from (ends - starts)) / 60.0 as minutes
+    from
+        next_cam
+    where
+        (camera_id = 4 and next_camera = 5 and direction = 1) or
+        (camera_id = 5 and next_camera = 4 and next_dir = 0)
+),
+pred_final as (
+    select
+        minutes,
+        extract(dow from starts) as dow,
+        case
+            when extract(hour from starts) >= 7  and extract(hour from starts) < 11 then 'Утро'
+            when extract(hour from starts) >= 11 and extract(hour from starts) < 17 then 'День'
+            when extract(hour from starts) >= 17 and extract(hour from starts) < 21 then 'Вечер'
+            else 'Ночь'
+        end as time_period
+    from
+        pairs
+),
+medians as (
+    select
+        dow,
+        time_period,
+        round(percentile_cont(0.5) within group (order by minutes)) as median
+    from
+        pred_final
+    group by
+        1, 2
+)
+select
+    median
+from
+    medians
+group by
+    1
+order by
+    count(*) desc, median asc
+limit
+    1
+
+--Действительно, спасибо за замечание, при прошлом методе мы строго отсеивали, и брали записи только по камерам 4 и 5
+--В новой версии берём ВСЕ записи, с помощью функции lead смотрим на следующую запись по автомобилю, строго связывая по времени проезда
+--Изменилась только логика определения проезда участка 4-5, остальной скрипт соответствует первой версии 
